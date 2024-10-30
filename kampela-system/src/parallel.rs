@@ -1,8 +1,4 @@
 //! Asynchronous operation generic code
-#[cfg(not(feature="std"))]
-use alloc::vec::Vec;
-#[cfg(feature="std")]
-use std::vec::Vec;
 use core::array;
 
 use efm32pg23_fix::SYST;
@@ -30,7 +26,7 @@ impl Timer {
         };
 
         let current = SYST::get_current();
-        let diff = if current < self.last_clock_value {
+        let diff = if current <= self.last_clock_value {
             self.last_clock_value - current
         } else {
             SYST::get_ticks_per_10ms() + self.last_clock_value - current //manage reload, should work if tick < 10ms

@@ -6,7 +6,7 @@
 extern crate alloc;
 extern crate core;
 
-use alloc::{borrow::ToOwned, format};
+use alloc::format;
 use core::{alloc::Layout, cell::RefCell, ops::DerefMut, panic::PanicInfo, ptr::addr_of};
 use cortex_m::{interrupt::{free, Mutex}, asm::delay};
 use cortex_m_rt::{entry, exception, ExceptionFrame};
@@ -16,19 +16,18 @@ use lazy_static::lazy_static;
 
 use kampela_system::{
     PERIPHERALS, CORE_PERIPHERALS,
-    devices::{power::ADC, touch::{Read, FT6X36_REG_NUM_TOUCHES, LEN_NUM_TOUCHES, enable_touch_int}},
+    devices::{power::ADC, touch::{Read, FT6X36_REG_NUM_TOUCHES, LEN_NUM_TOUCHES}},
     debug_display::burning_tank,
     init::init_peripherals,
     parallel::{AsyncOperation, Threads},
     BUF_THIRD, CH_TIM0, LINK_1, LINK_2, LINK_DESCRIPTORS, TIMER0_CC0_ICF, NfcXfer, NfcXferBlock,
 };
 use efm32pg23_fix::{interrupt, Interrupt, Peripherals, NVIC, SYST};
-use kampela_ui::platform::Platform;
 
 mod ui;
 use ui::{UIOperationThreads, UI};
 mod nfc;
-use nfc::{BufferStatus, NfcReceiver, NfcStateOutput, NfcResult, NfcError};
+use nfc::BufferStatus;
 mod touch;
 use touch::{try_push_touch_data, get_touch_status};
 
@@ -173,44 +172,42 @@ fn main() -> ! {
     //         .0
     //         .expand_to_keypair(ExpansionMode::Ed25519);
 
-    let mut main_state = MainState::new(&nfc_buffer);
+    let mut main_state = MainState::new(());
     loop {
         main_state.advance(());
     }
 }
 
-enum MainStatus<'a> {
+enum MainStatus {
     ADCProbe,
-    NFCRead(NfcReceiver<'a>),
     Display(Option<UIOperationThreads>),
     TouchRead(Option<Read<LEN_NUM_TOUCHES, FT6X36_REG_NUM_TOUCHES>>),
 }
 
-impl<'a> Default for MainStatus<'a> {
+impl Default for MainStatus {
     fn default() -> Self {
         MainStatus::ADCProbe
     }
 }
 
-struct MainState<'a> {
-    threads: Threads<MainStatus<'a>, 3>,
+struct MainState {
+    threads: Threads<MainStatus, 3>,
     adc: ADC,
     ui: UI,
 }
 
-impl<'a> AsyncOperation for MainState<'a> {
-    type Init = &'a [u16; 3*BUF_THIRD];
+impl AsyncOperation for MainState {
+    type Init = ();
     type Input<'b> = ();
     type Output = ();
     /// Start of UI.
-    fn new(nfc_buffer: Self::Init) -> Self {
+    fn new(_: Self::Init) -> Self {
         let ui = UI::new(());
-        let receiver = NfcReceiver::new(nfc_buffer, ui.state.platform.public().map(|a| a.0));
         
         // initialize SYST for Timer
-        free(|cs| {  
+        free(|cs| {
             let mut core_periph = CORE_PERIPHERALS.borrow(cs).borrow_mut();
-            
+            core_periph.SYST.set_clock_source(cortex_m::peripheral::syst::SystClkSource::Core);
             core_periph.SYST.set_reload(SYST::get_ticks_per_10ms());
             core_periph.SYST.clear_current();
             core_periph.SYST.enable_counter();
@@ -218,7 +215,8 @@ impl<'a> AsyncOperation for MainState<'a> {
         return Self {
             threads: Threads::from([
                 MainStatus::ADCProbe,
-                MainStatus::NFCRead(receiver),
+                MainStatus::Display(None),
+                MainStatus::TouchRead(None),
             ]),
             adc: ADC::new(()),
             ui,
@@ -231,60 +229,13 @@ impl<'a> AsyncOperation for MainState<'a> {
             MainStatus::ADCProbe => {
                 self.adc.advance(());
             },
-            MainStatus::NFCRead(receiver) => {
-                if let Some(s) = receiver.advance(self.adc.read()) {
-                    match s {
-                        Err(e) => {
-                            match e {
-                                NfcError::InvalidAddress => {
-                                    self.ui.handle_message("Invalid sender address".to_owned())
-                                }
-                            }
-                            self.threads.change(MainStatus::Display(None));
-                        }
-                        Ok(s) => {
-                            match s {
-                                NfcStateOutput::Operational(i) => {
-                                    if i == 1 {
-                                        self.ui.handle_message("Receiving NFC packets...".to_owned());
-                                        if !self.threads.is_all_running(&[
-                                            |s| matches!(s, MainStatus::Display(_))
-                                        ]) {
-                                            self.threads.wind(MainStatus::Display(None));
-                                        };
-                                    }
-                                },
-                                NfcStateOutput::Done(r) => {
-                                    match r {
-                                        NfcResult::Empty => {
-                                            if !self.threads.is_all_running(&[
-                                                |s| matches!(s, MainStatus::Display(_))
-                                            ]) {
-                                                self.threads.wind(MainStatus::Display(None));
-                                            };
-                                        },
-                                        NfcResult::DisplayAddress => {
-                                            self.ui.handle_address([0;76]);
-                                        },
-                                        NfcResult::Transaction(transaction) => {
-                                            self.ui.handle_transaction(transaction);
-                                        }
-                                    }
-                                    enable_touch_int();
-                                    self.threads.change(MainStatus::TouchRead(None));
-                                }
-                            }
-                        }
-                    }
-                }
-            },
             MainStatus::Display(state) => {
                 match state {
                     None => {
                         self.threads.change(MainStatus::Display(Some(UIOperationThreads::new())));
                     },
                     Some(t) => {
-                        if self.ui.advance((self.adc.read(), t)) == Some(false) {
+                        if self.ui.advance((self.adc.read(), self.adc.get(), t)) == Some(false) {
                             self.threads.hold();
                         }
                     }

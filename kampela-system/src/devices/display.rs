@@ -284,7 +284,7 @@ impl AsyncOperation for EPDInit {
                             deselect_display(&mut peripherals.gpio_s);
                             display_res_set(&mut peripherals.gpio_s);
                         });
-                        self.threads.change(EPDInitState::ResSet(Some(Timer::new(15))));
+                        self.threads.change(EPDInitState::ResSet(Some(Timer::new(DELAY))));
                     },
                     Some(t) => {
                         if t.tick() {
@@ -377,10 +377,6 @@ impl AsyncOperation for EPDDeepSleepEnter {
             EPDDeepSleepEnterState::DeepSleepMode(state) => {
                 match state {
                     None => {
-                        in_free(|peripherals| {
-                            deselect_display(&mut peripherals.gpio_s);
-                            display_res_set(&mut peripherals.gpio_s);
-                        });
                         self.threads.change(EPDDeepSleepEnterState::DeepSleepMode(Some(EPDCommand::new(()))));
                     },
                     Some(a) => {
@@ -397,9 +393,6 @@ impl AsyncOperation for EPDDeepSleepEnter {
             EPDDeepSleepEnterState::EnterDeepSleepMode1(state) => {
                 match state {
                     None => {
-                        in_free(|peripherals| {
-                            display_res_clear(&mut peripherals.gpio_s);
-                        });
                         self.threads.change(EPDDeepSleepEnterState::EnterDeepSleepMode1(Some(EPDData::new(()))));
                     },
                     Some(a) => {
