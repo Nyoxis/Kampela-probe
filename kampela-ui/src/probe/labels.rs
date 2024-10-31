@@ -1,8 +1,3 @@
-#[cfg(not(feature="std"))]
-use alloc::vec::Vec;
-#[cfg(feature="std")]
-use std::vec::Vec;
-
 use embedded_graphics::{
     mono_font::{
         ascii::FONT_6X13, MonoFont, MonoTextStyle

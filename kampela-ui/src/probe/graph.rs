@@ -1,8 +1,3 @@
-#[cfg(not(feature="std"))]
-use alloc::vec::Vec;
-#[cfg(feature="std")]
-use std::vec::Vec;
-
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::{Dimensions, DrawTarget, Point, Size},

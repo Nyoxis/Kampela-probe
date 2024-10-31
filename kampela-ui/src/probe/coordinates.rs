@@ -1,14 +1,7 @@
-#[cfg(not(feature="std"))]
-use alloc::vec::Vec;
-#[cfg(feature="std")]
-use std::vec::Vec;
-
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::{Dimensions, DrawTarget, Point, Size},
-    primitives::{
-        PrimitiveStyle, Rectangle,
-    },
+    primitives::Rectangle,
     Drawable, Pixel
 };
 
@@ -81,7 +74,7 @@ impl View for Coordinates {
         COORDINATES_WIDGET.bounding_box_absolute()
     }
 
-    fn draw_view<'a, D>(&mut self, target: &mut DrawView<D>, voltages: Self::DrawInput<'a>) -> Result<Self::DrawOutput,D::Error>
+    fn draw_view<'a, D>(&mut self, target: &mut DrawView<D>, _: Self::DrawInput<'a>) -> Result<Self::DrawOutput,D::Error>
         where 
             D: DrawTarget<Color = BinaryColor>,
             Self: 'a,

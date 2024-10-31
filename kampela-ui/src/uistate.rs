@@ -46,8 +46,8 @@ pub enum UpdateRequest {
     Slow,
     Fast,
     UltraFast,
-    PartBlack(Rectangle),
-    PartWhite(Rectangle),
+    UltraFastSelective,
+    Part(Rectangle),
 }
 
 pub trait UpdateRequestMutate {

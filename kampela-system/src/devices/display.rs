@@ -1,5 +1,4 @@
 //! display control functions
-
 use crate::peripherals::usart::*;
 use crate::peripherals::gpio_pins::{display_res_clear, display_res_set};
 use crate::in_free;
@@ -53,14 +52,14 @@ const ULTRAFAST_LUT: [u8; LUT_LEN] = [
     0x70, 0x00, 0x00, 0x00, 0x00, 0x00, // FR
     0x00, 0x00, 0x00,                   // XON
 ];
-const PART_BLACK_LUT: [u8; LUT_LEN] = [
-    0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 0
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 1
+const ULTRAFAST_SELECTIVE_LUT: [u8; LUT_LEN] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 0
+    0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 1
     0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 2
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 3
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 4
 //  TPA   TPB   SRAB  TPC   TPD   SRCD  RP
-    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x10, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -76,36 +75,6 @@ const PART_BLACK_LUT: [u8; LUT_LEN] = [
     0x70, 0x00, 0x00, 0x00, 0x00, 0x00, // FR
     0x00, 0x00, 0x00,                   // XON
 ];
-const PART_WHITE_LUT: [u8; LUT_LEN] = [
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 0
-    0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 1
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 2
-    0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 3
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LUT 4
-//  TPA   TPB   SRAB  TPC   TPD   SRCD  RP
-    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    
-    0x70, 0x00, 0x00, 0x00, 0x00, 0x00, // FR
-    0x00, 0x00, 0x00,                   // XON
-];
-
-#[derive(Clone, Copy)]
-pub enum PartMode {
-    PartWhite,
-    PartBlack,
-    BlackAndWhite,
-}
 
 pub type Bounds = (u8, u8, u16, u16);
 
@@ -120,10 +89,11 @@ pub struct Request<R> where
     > 
 {
     threads: Threads<RequestState<R>, 1>,
-    part_options: <Request<R> as AsyncOperation>::Init
+    part_options: Option<Bounds>,
+    selective_refresh: Option<bool>,
 }
 
-pub enum RequestState<R> where
+enum RequestState<R> where
     R: for <'a> RequestType<
         Init = <UpdateUltraFast as AsyncOperation>::Init,
         Input<'a> = (),
@@ -155,14 +125,15 @@ impl<R> AsyncOperation for Request<R> where
         Output = Option<bool>,
     >
 {
-    type Init = Option<(Bounds, PartMode)>;
+    type Init = (Option<Bounds>, Option<bool>);
     type Input<'a> = <PrepareDraw as AsyncOperation>::Input<'a>;
     type Output = Option<bool>;
 
-    fn new(part_options: Self::Init) -> Self {
+    fn new((part_options, selective_refresh): Self::Init) -> Self {
         Self {
             threads: Threads::new(RequestState::Init(None)),
-            part_options
+            part_options,
+            selective_refresh,
         }
     }
 
@@ -187,7 +158,7 @@ impl<R> AsyncOperation for Request<R> where
             RequestState::PrepareDraw(state) => {
                 match state {
                     None => {
-                        self.threads.change(RequestState::PrepareDraw(Some(PrepareDraw::new(self.part_options.map(|a|a.0)))));
+                        self.threads.change(RequestState::PrepareDraw(Some(PrepareDraw::new((self.part_options, self.selective_refresh)))));
                     },
                     Some(a) => {
                         match a.advance(data) {
@@ -203,7 +174,7 @@ impl<R> AsyncOperation for Request<R> where
             RequestState::Update(state) => {
                 match state {
                     None => {
-                        self.threads.change(RequestState::Update(Some(R::new(self.part_options.map(|a|a.1)))));
+                        self.threads.change(RequestState::Update(Some(R::new(self.selective_refresh.is_some()))));
                     },
                     Some(a) => {
                         match a.advance(()) {
@@ -248,11 +219,11 @@ impl<R> AsyncOperation for Request<R> where
 
 
 /// EPD init to wake up display
-pub struct EPDInit {
+struct EPDInit {
     threads: Threads<EPDInitState, 1>,
 }
 
-pub enum EPDInitState {
+enum EPDInitState {
     ResSet(Option<Timer>),
     ResClr(Option<Timer>),
     WakeUp(Option<EPDCommand<0x12>>),
@@ -345,11 +316,11 @@ impl AsyncOperation for EPDInit {
 
 
 /// EPD init to wake up display
-pub struct EPDDeepSleepEnter {
+struct EPDDeepSleepEnter {
     threads: Threads<EPDDeepSleepEnterState, 1>,
 }
 
-pub enum EPDDeepSleepEnterState {
+enum EPDDeepSleepEnterState {
     DeepSleepMode(Option<EPDCommand<0x10>>),
     // Retain RAM data
     EnterDeepSleepMode1(Option<EPDData<1>>),
@@ -424,10 +395,16 @@ impl RequestType for UpdateUltraFast {}
 
 pub struct PrepareDraw {
     threads: Threads<PrepareDrawState, 1>,
-    bounds: <PrepareDraw as AsyncOperation>::Init,
+    bounds: <EPDDataBuffer::<BUFSIZE> as AsyncOperation>::Init,
+    last_black: bool,
 }
 
-pub enum PrepareDrawState {
+enum WriteBlackOrRed {
+    Black(EPDCommand<0x24>),
+    Red(EPDCommand<0x26>),
+}
+
+enum PrepareDrawState {
     //Set RAM X address start/end postition (which is Y due to orientation)
     SetRamXAddress(Option<EPDCommand<0x44>>),
     RamXStartEnd(Option<(EPDData<2>, [u8; 2])>),
@@ -443,7 +420,10 @@ pub enum PrepareDrawState {
     BorderWaveformControl(Option<EPDCommand<0x3C>>),
     VBDasVCOM(Option<EPDData<1>>),
 
-    WriteRamBlack(Option<EPDCommand<0x24>>),
+    DisplayUpdateControl1(Option<EPDCommand<0x21>>),
+    InverseRedInverseBlackRam(Option<EPDData<2>>),
+
+    WriteRamBlackOrRed(Option<WriteBlackOrRed>),
     SendBufferData(Option<EPDDataBuffer<BUFSIZE>>),
 
     End,
@@ -455,11 +435,11 @@ impl Default for PrepareDrawState {
 }
 
 impl AsyncOperation for PrepareDraw {
-    type Init = <EPDDataBuffer::<BUFSIZE> as AsyncOperation>::Init;
+    type Init = (<EPDDataBuffer::<BUFSIZE> as AsyncOperation>::Init, Option<bool>);
     type Input<'a> = &'a [u8; BUFSIZE];
     type Output = Option<bool>;
 
-    fn new(bounds: Self::Init) -> Self {
+    fn new((bounds, selective_refresh): Self::Init) -> Self {
         let init_state = match bounds {
             //skip bounds addresses transmission
             None => {
@@ -472,6 +452,7 @@ impl AsyncOperation for PrepareDraw {
         Self {
             threads: Threads::new(init_state),
             bounds,
+            last_black: selective_refresh.unwrap_or(false),
         }
     }
 
@@ -669,7 +650,7 @@ impl AsyncOperation for PrepareDraw {
                     Some(a) => {
                         match a.advance(&[0x01]) {
                             Some(true) => {
-                                self.threads.change(PrepareDrawState::WriteRamBlack(None));
+                                self.threads.change(PrepareDrawState::DisplayUpdateControl1(None));
                             },
                             r => return r
                         };
@@ -677,16 +658,59 @@ impl AsyncOperation for PrepareDraw {
                 }
                 Some(false)
             }
-            PrepareDrawState::WriteRamBlack(state) => {
+            PrepareDrawState::DisplayUpdateControl1(state) => {
                 match state {
                     None => {
-                        self.threads.change(PrepareDrawState::WriteRamBlack(Some(EPDCommand::new(()))));
+                        if self.last_black {
+                            self.threads.change(PrepareDrawState::DisplayUpdateControl1(Some(EPDCommand::new(()))));
+                        } else {
+                            self.threads.change(PrepareDrawState::WriteRamBlackOrRed(None)); // skip inverse
+                        }
                     },
                     Some(a) => {
                         match a.advance(()) {
                             Some(true) => {
-                                self.threads.change(PrepareDrawState::SendBufferData(None));
+                                self.threads.change(PrepareDrawState::InverseRedInverseBlackRam(None));
                             },
+                            r => return r
+                        };
+                    }
+                }
+                Some(false)
+            },
+            PrepareDrawState::InverseRedInverseBlackRam(state) => {
+                match state {
+                    None => {
+                        self.threads.change(PrepareDrawState::InverseRedInverseBlackRam(Some(EPDData::new(()))));
+                    },
+                    Some(a) => {
+                        match a.advance(&[0x88, 0x00]) {
+                            Some(true) => {
+                                self.threads.change(PrepareDrawState::WriteRamBlackOrRed(None));
+                            },
+                            r => return r
+                        };
+                    }
+                }
+                Some(false)
+            }
+            PrepareDrawState::WriteRamBlackOrRed(state) => {
+                match state {
+                    None => {
+                        let epd_command = if self.last_black {
+                            WriteBlackOrRed::Red(EPDCommand::new(()))
+                        } else {
+                            WriteBlackOrRed::Black(EPDCommand::new(()))
+                        };
+                        self.threads.change(PrepareDrawState::WriteRamBlackOrRed(Some(epd_command)));
+                    },
+                    Some(a) => {
+                        let b = match a {
+                            WriteBlackOrRed::Black(a)  => a.advance(()),
+                            WriteBlackOrRed::Red(a) => a.advance(()),
+                        };
+                        match b  {
+                            Some(true) => self.threads.change(PrepareDrawState::SendBufferData(None)),
                             r => return r
                         };
                     }
@@ -724,7 +748,7 @@ pub struct UpdateFull {
     threads: Threads<UpdateFullState, 1>,
 }
 
-pub enum UpdateFullState {
+enum UpdateFullState {
     // set read temperature from internal TS
     TempSensorControl(Option<EPDCommand<0x18>>),
     InternalTempSensor(Option<EPDData<1>>),
@@ -853,7 +877,7 @@ pub struct UpdateFast {
     threads: Threads<UpdateFastState, 1>,
 }
 
-pub enum UpdateFastState {
+enum UpdateFastState {
     // Load custom LUT
     WtiteLUTRegister(Option<EPDCommand<0x32>>),
     CustomLUTData(Option<EPDData<LUT_LEN>>),
@@ -983,7 +1007,7 @@ pub struct UpdateUltraFast {
     part_mode: <UpdateUltraFast as AsyncOperation>::Init
 }
 
-pub enum UpdateUltraFastState {
+enum UpdateUltraFastState {
     // Load custom LUT
     WtiteLUTRegister(Option<EPDCommand<0x32>>),
     CustomLUTData(Option<EPDData<LUT_LEN>>),
@@ -1002,7 +1026,7 @@ impl Default for UpdateUltraFastState {
 }
 
 impl AsyncOperation for UpdateUltraFast {
-    type Init = Option<PartMode>;
+    type Init = bool;
     type Input<'a> = ();
     type Output = Option<bool>;
 
@@ -1037,16 +1061,10 @@ impl AsyncOperation for UpdateUltraFast {
                         self.threads.change(UpdateUltraFastState::CustomLUTData(Some(EPDData::new(()))));
                     },
                     Some(a) => {
-                        let lut = match self.part_mode {
-                            None | Some(PartMode::BlackAndWhite) => {
-                                &ULTRAFAST_LUT
-                            },
-                            Some(PartMode::PartBlack) => {
-                                &PART_BLACK_LUT
-                            },
-                            Some(PartMode::PartWhite) => {
-                                &PART_WHITE_LUT
-                            }
+                        let lut = if self.part_mode {
+                            &ULTRAFAST_SELECTIVE_LUT
+                        } else {
+                            &ULTRAFAST_LUT
                         };
                         match a.advance(lut) {
                             Some(true) => {

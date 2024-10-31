@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use bitvec::prelude::{BitArr, Msb0, bitarr};
 use efm32pg23_fix::Peripherals;
 use embedded_graphics::{
@@ -15,7 +16,7 @@ use qrcodegen_no_heap::{QrCode, QrCodeEcc, Version};
 use crate::{
     devices::{
         display::{
-            Bounds, PartMode, Request, UpdateFast, UpdateFull, UpdateUltraFast
+            Bounds, Request, UpdateFast, UpdateFull, UpdateUltraFast
         },
         touch::{disable_touch_int, enable_touch_int}
     }, parallel::{AsyncOperation, Threads}
@@ -74,6 +75,7 @@ const FAST_REFRESH_POWER: i32 = 5000;
 const FULL_REFRESH_POWER: i32 = 5000;
 const PART_REFRESH_POWER: i32 = 5000;
 
+const SEQUENCIAL_SELECTIVE_LIMIT: usize = 5; // more sequencial selective refreshes cause to leave traces, less cause artefacts
 /// Virtual display data storage
 type PixelData = BitArr!(for SCREEN_SIZE_VALUE, in u8, Msb0);
 
@@ -81,6 +83,8 @@ type PixelData = BitArr!(for SCREEN_SIZE_VALUE, in u8, Msb0);
 /// A virtual display that could be written to EPD simultaneously
 pub struct FrameBuffer {
     data: PixelData,
+    last_black: bool,
+    selective_counter: usize,
 }
 
 pub struct DisplayOperationThreads(Threads<DisplayState, 1>);
@@ -128,25 +132,24 @@ impl DisplayOperationThreads {
         if self.is_any_running() {
             panic!("more than one request at a time");
         }
-        self.wind(DisplayState::UltraFastOperating((None, None)));
+        self.wind(DisplayState::UltraFastOperating((None, None, false)));
     }
 
     /// Start part display update sequence with black draw
-    pub fn request_part_black(&mut self, area: Option<Rectangle>) {
+    pub fn request_ultrafast_selective(&mut self) {
         if self.is_any_running() {
             panic!("more than one request at a time");
         }
-        let part_options = area.map(|r| (refreshable_area_address(r), PartMode::PartBlack));
-        self.wind(DisplayState::UltraFastOperating((None, part_options)));
+        self.wind(DisplayState::UltraFastOperating((None, None, true)));
     }
 
-    /// Start part display update sequence with white draw
-    pub fn request_part_white(&mut self, area: Option<Rectangle>) {
+    /// Start part display update sequence with black draw
+    pub fn request_part(&mut self, area: Option<Rectangle>) {
         if self.is_any_running() {
             panic!("more than one request at a time");
         }
-        let part_options = area.map(|r| (refreshable_area_address(r), PartMode::PartWhite));
-        self.wind(DisplayState::UltraFastOperating((None, part_options)));
+        let part_options = area.map(|r| refreshable_area_address(r));
+        self.wind(DisplayState::UltraFastOperating((None, part_options, true)));
     }
 }
 
@@ -155,6 +158,8 @@ impl FrameBuffer {
     pub fn new_white() -> Self {
         Self {
             data: bitarr!(u8, Msb0; 1; SCREEN_SIZE_X as usize*SCREEN_SIZE_Y as usize),
+            last_black: false,
+            selective_counter: 0,
         }
     }
 
@@ -178,7 +183,7 @@ pub enum DisplayState {
     /// Fast update was requested; waiting for power
     FastOperating(Option<Request<UpdateFast>>),
     /// Part update was requested; waiting for power
-    UltraFastOperating((Option<Request<UpdateUltraFast>>, Option<(Bounds, PartMode)>)),
+    UltraFastOperating((Option<Request<UpdateUltraFast>>, Option<Bounds>, bool)),
     /// Display not available due to update cycle
     UpdatingNow,
 }
@@ -204,7 +209,9 @@ impl AsyncOperation for FrameBuffer {
                 match state {
                     None => {
                         if voltage > FULL_REFRESH_POWER {
-                            threads.change(DisplayState::FullOperating(Some(Request::<UpdateFull>::new(None))));
+                            threads.change(DisplayState::FullOperating(Some(Request::<UpdateFull>::new((None, None)))));
+                            self.last_black = true;
+                            self.selective_counter = 0;
                         }
                         None
                     },
@@ -223,7 +230,9 @@ impl AsyncOperation for FrameBuffer {
                 match state {
                     None => {
                         if voltage > FAST_REFRESH_POWER {
-                            threads.change(DisplayState::FastOperating(Some(Request::<UpdateFast>::new(None))));
+                            threads.change(DisplayState::FastOperating(Some(Request::<UpdateFast>::new((None, None)))));
+                            self.last_black =true;
+                            self.selective_counter = 0;
                         }
                         None
                     },
@@ -238,12 +247,22 @@ impl AsyncOperation for FrameBuffer {
                     }
                 }
             },
-            DisplayState::UltraFastOperating((state, part_options)) => {
+            DisplayState::UltraFastOperating((state, part_options, selective_refresh)) => {
                 match state {
                     None => {
                         if voltage > PART_REFRESH_POWER {
                             let p = part_options.take();
-                            threads.change(DisplayState::UltraFastOperating((Some(Request::<UpdateUltraFast>::new(p)), None)));
+                            let selective = selective_refresh.to_owned();
+                            let r = if selective && self.selective_counter < SEQUENCIAL_SELECTIVE_LIMIT {
+                                self.selective_counter += 1;
+                                self.last_black = !self.last_black;
+                                Some(!self.last_black)
+                            } else {
+                                self.selective_counter = 0;
+                                self.last_black = true;
+                                None
+                            };
+                            threads.change(DisplayState::UltraFastOperating((Some(Request::<UpdateUltraFast>::new((p, r))), None, false)));
                         }
                         None
                     },

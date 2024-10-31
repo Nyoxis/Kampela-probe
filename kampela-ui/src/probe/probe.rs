@@ -1,8 +1,3 @@
-#[cfg(not(feature="std"))]
-use alloc::boxed::Box;
-#[cfg(feature="std")]
-use std::boxed::Box;
-
 use embedded_graphics::{
     prelude::{Point, DrawTarget},
     primitives::{Primitive, PrimitiveStyle},
@@ -43,7 +38,7 @@ impl ViewScreen for Probe {
         D: DrawTarget<Color = BinaryColor>,
         Self: 'a,
     {
-        let request = Some(UpdateRequest::UltraFast);
+        let request = Some(UpdateRequest::UltraFastSelective);
         let state = None;
 
         let filled = PrimitiveStyle::with_fill(BinaryColor::Off);
@@ -54,7 +49,7 @@ impl ViewScreen for Probe {
 
         Ok((EventResult { request, state }, ()))
     }
-    fn handle_tap_screen<'a>(&mut self, point: Point, _: ()) -> (EventResult, ())
+    fn handle_tap_screen<'a>(&mut self, _: Point, _: ()) -> (EventResult, ())
     where
         Self: 'a
     {
